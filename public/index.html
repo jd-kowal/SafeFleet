@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <title>Centrum Dowodzenia Flotą</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f4f8; margin: 0; padding: 20px; color: #333; }
+        h1 { color: #1e3a8a; text-align: center; }
+        .container { display: flex; gap: 20px; max-width: 1200px; margin: 0 auto; }
+        .panel { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); flex: 1; }
+        h2 { border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; margin-top: 0; }
+        label { font-weight: bold; display: block; margin-top: 15px; }
+        input { width: 100%; padding: 8px; margin-top: 5px; border: 1px solid #cbd5e1; border-radius: 5px; box-sizing: border-box; }
+        button { background-color: #2563eb; color: white; border: none; padding: 10px 15px; margin-top: 20px; cursor: pointer; border-radius: 5px; font-weight: bold; width: 100%; }
+        button:hover { background-color: #1d4ed8; }
+        button.refresh { background-color: #10b981; }
+        button.refresh:hover { background-color: #059669; }
+        pre { background: #1e293b; color: #38bdf8; padding: 15px; border-radius: 5px; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word; font-size: 14px; }
+        .status-box { background: #e0f2fe; padding: 10px; border-radius: 5px; margin-bottom: 15px; font-weight: bold; }
+        .ship-list { list-style: none; padding: 0; }
+        .ship-item { background: #f8fafc; padding: 10px; border-left: 4px solid #3b82f6; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+
+    <h1>⚓ Centrum Dowodzenia Flotą (Ethereum + Raft)</h1>
+
+    <div class="container">
+        <div class="panel">
+            <h2>Dodaj nowy statek</h2>
+            <form id="addShipForm">
+                <label>Port (np. 4001):</label>
+                <input type="number" id="port" required>
+
+                <label>Peers (porty innych statków, po przecinku):</label>
+                <input type="text" id="peers" placeholder="np. 4002,4003" required>
+
+                <label>Klucz Prywatny Statku:</label>
+                <input type="text" id="pk" placeholder="0x..." required>
+
+                <button type="submit">Zautoryzuj w Smart Kontrakcie i Uruchom</button>
+            </form>
+            <p id="formMessage" style="color: green; font-weight: bold;"></p>
+
+            <h3>Aktywne procesy (Lokalne):</h3>
+            <ul class="ship-list" id="activeShipsList">
+                </ul>
+        </div>
+
+        <div class="panel">
+            <h2>Status z Blockchaina</h2>
+            <button class="refresh" onclick="fetchFleetData()">Pobierz najnowsze dane z sieci</button>
+            
+            <div style="margin-top: 20px;">
+                <div class="status-box">
+                    Lider Floty: <span id="leaderAddress">Brak</span><br>
+                    Obecna Kadencja (Term): <span id="currentTerm">0</span>
+                </div>
+                
+                <label>Raport GPS Floty (Ostatni zatwierdzony blok):</label>
+                <pre id="gpsData">Oczekuję na dane...</pre>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('addShipForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const port = document.getElementById('port').value;
+            const peers = document.getElementById('peers').value;
+            const pk = document.getElementById('pk').value;
+            const msgEl = document.getElementById('formMessage');
+
+            msgEl.style.color = "orange";
+            msgEl.textContent = "Autoryzowanie w blockchainie i uruchamianie...";
+
+            try {
+                const response = await fetch('/api/start-ship', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ port, peers, privateKey: pk })
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    msgEl.style.color = "green";
+                    msgEl.textContent = result.message;
+                    
+                    // Dodaj do lokalnej listy
+                    const li = document.createElement('li');
+                    li.className = 'ship-item';
+                    li.innerHTML = `<strong>Port: ${port}</strong> <br><small>Adres: ${result.address}</small>`;
+                    document.getElementById('activeShipsList').appendChild(li);
+                    
+                    document.getElementById('port').value = '';
+                    document.getElementById('peers').value = '';
+                } else {
+                    msgEl.style.color = "red";
+                    msgEl.textContent = result.error;
+                }
+            } catch (err) {
+                msgEl.style.color = "red";
+                msgEl.textContent = "Błąd połączenia z serwerem.";
+            }
+        });
+
+        async function fetchFleetData() {
+            const gpsEl = document.getElementById('gpsData');
+            gpsEl.textContent = "Pobieranie...";
+
+            try {
+                const response = await fetch('/api/fleet-status');
+                const result = await response.json();
+
+                if (result.error) {
+                    gpsEl.style.color = "#ef4444";
+                    gpsEl.textContent = "Błąd API: " + result.error;
+                    return;
+                }
+
+                gpsEl.style.color = "#38bdf8"; 
+
+                const isEmptyAddress = !result.leader || result.leader === "0x0000000000000000000000000000000000000000";
+                document.getElementById('leaderAddress').textContent = isEmptyAddress ? "Brak" : result.leader;
+                document.getElementById('currentTerm').textContent = result.term || "0";
+                
+                if (result.data && Object.keys(result.data).length > 0) {
+                    gpsEl.textContent = JSON.stringify(result.data, null, 4);
+                } else {
+                    gpsEl.textContent = "Brak raportów GPS w smart kontrakcie (dane są puste).";
+                }
+            } catch (err) {
+                gpsEl.style.color = "#ef4444";
+                gpsEl.textContent = "Błąd komunikacji z serwerem API: " + err.message;
+            }
+        }
+    </script>
+</body>
+</html>
